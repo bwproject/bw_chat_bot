@@ -4,6 +4,7 @@ import sys
 import os
 import asyncio
 import logging
+import re
 
 from dotenv import load_dotenv
 
