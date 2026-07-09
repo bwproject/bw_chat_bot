@@ -1,4 +1,4 @@
-#bot.py
+#main.py
 
 import sys
 import os
