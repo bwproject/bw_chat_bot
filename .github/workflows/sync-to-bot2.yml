@@ -1,4 +1,4 @@
-name: Sync bw_ipa_repo to TikTok-Downloader-Bot/bot2
+name: Sync bw_chat_bot to TikTok-Downloader-Bot/bot2
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout source repo
         uses: actions/checkout@v4
 
-      - name: Setup git auth for private repo
+      - name: Setup git auth for target repo
         run: |
           git config --global url."https://x-access-token:${{ secrets.TARGET_REPO_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
@@ -26,10 +26,10 @@ jobs:
         run: |
           mkdir -p target/bot2
 
-          # Полное зеркало (удаляет старые файлы в bot4)
+          # Полное зеркало bw_chat_bot в bot2
           rsync -av --delete \
             --exclude ".git" \
-            ./ target/bot4/
+            ./ target/bot2/
 
       - name: Commit and push changes
         run: |
@@ -38,12 +38,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bot4
+          git add bot2
 
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "Sync bot2"
+          git commit -m "Sync bw_chat_bot to bot2"
           git push origin main
