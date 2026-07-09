@@ -20,20 +20,20 @@ jobs:
 
       - name: Clone target repository
         run: |
-          git clone https://github.com/bwproject/TikTok-Downloader-Bot.git target
+          git clone https://github.com/bwproject/TikTok-Downloader-Bot.git ../target
 
       - name: Sync files into bot2 folder
         run: |
-          mkdir -p target/bot2
+          mkdir -p ../target/bot2
 
           # Полное зеркало bw_chat_bot в bot2
           rsync -av --delete \
             --exclude ".git" \
-            ./ target/bot2/
+            ./ ../target/bot2/
 
       - name: Commit and push changes
         run: |
-          cd target
+          cd ../target
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -47,3 +47,7 @@ jobs:
 
           git commit -m "Sync bw_chat_bot to bot2"
           git push origin main
+
+      - name: Cleanup
+        run: |
+          rm -rf ../target
