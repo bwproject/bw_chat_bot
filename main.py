@@ -45,7 +45,7 @@ bot = None
 
 import telegram_userbot
 
-telethon.register_handlers(dp)
+telegram_userbot.register_handlers(dp)
 
 # ─────────────────────────────
 async def create_bot():
