@@ -43,7 +43,9 @@ dp = Dispatcher()
 
 bot = None
 
+import telethon
 
+telethon.register_handlers(dp)
 
 # ─────────────────────────────
 async def create_bot():
