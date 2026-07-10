@@ -43,7 +43,7 @@ dp = Dispatcher()
 
 bot = None
 
-import telethon
+import telegram_userbot
 
 telethon.register_handlers(dp)
 
