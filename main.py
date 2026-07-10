@@ -1,10 +1,9 @@
-# main.py
-
 # ─── Включение / отключение прокси ───────────
-USE_PROXY = True
+USE_PROXY = True   # True = использовать прокси
+                   # False = запуск без прокси
 
-import os
 import sys
+import os
 import asyncio
 import logging
 
@@ -18,27 +17,54 @@ sys.path.append(
 
 load_dotenv()
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
+from aiogram.filters import Command
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
+
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+from telethon.errors import SessionPasswordNeededError
 
 from proxsybot import init_proxy, proxy_watcher
 
 from user import (
     start_client,
-    init_bot
+    restart_client,
+    init_bot,
+    send_to_user,
+    create_new_chat
 )
 
+# ─────────────────────────────
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID") or 0)
+API_ID = int(os.getenv("API_ID") or 0)
+API_HASH = os.getenv("API_HASH")
+
+AUTO_REPLY_DELAY = int(os.getenv("AUTO_REPLY_DELAY", "300"))
+
+AUTO_REPLY_TEXT = os.getenv(
+    "AUTO_REPLY_TEXT",
+    "Сейчас мы не в сети."
+)
+
+SESSION_FILE = "session.session"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("business_bot")
 
 dp = Dispatcher()
 
+pending_messages = {}
+admin_replied = {}
+login_sessions = {}
+
 bot = None
 
 
+# ─────────────────────────────
 async def create_bot():
 
     proxy = None
@@ -46,14 +72,18 @@ async def create_bot():
     if USE_PROXY:
         try:
             proxy = await init_proxy()
-        except Exception as e:
-            logger.error(f"Proxy error: {e}")
 
-    session = (
-        AiohttpSession(proxy=proxy)
-        if proxy
-        else AiohttpSession()
-    )
+        except Exception as e:
+            logger.error(f"❌ Proxy init error: {e}")
+            proxy = None
+
+    # ───── AIOHTTP SESSION
+    if proxy:
+        session = AiohttpSession(proxy=proxy)
+        logger.info(f"🌍 Aiogram proxy ENABLED: {proxy}")
+    else:
+        session = AiohttpSession()
+        logger.info("🌍 Aiogram no proxy")
 
     return Bot(
         token=TOKEN,
@@ -61,20 +91,208 @@ async def create_bot():
     )
 
 
+# ─────────────────────────────
 async def safe_delete_webhook():
 
-    for _ in range(3):
+    for i in range(3):
 
         try:
-            await bot.delete_webhook(
-                drop_pending_updates=True
-            )
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook deleted")
             return
 
-        except TelegramNetworkError:
+        except TelegramNetworkError as e:
+            logger.warning(f"Webhook retry {i+1}: {e}")
             await asyncio.sleep(3)
 
 
+# ─────────────────────────────
+@dp.business_message()
+async def business_message_handler(message: Message):
+
+    user_id = message.from_user.id
+
+    text = (
+        message.text
+        or message.caption
+        or "[MEDIA]"
+    )
+
+    pending_messages[user_id] = {
+        "chat_id": message.chat.id,
+        "business_connection_id": message.business_connection_id
+    }
+
+    logger.info(f"📩 BUSINESS MSG {user_id}: {text}")
+
+    await bot.send_message(
+        ADMIN_ID,
+        f"""📩 Новое сообщение
+
+👤 {message.from_user.full_name}
+🆔 <a href="tg://user?id={user_id}">{user_id}</a>
+
+{text}""",
+        parse_mode="HTML"
+    )
+
+    asyncio.create_task(
+        auto_reply_task(
+            user_id,
+            message.chat.id,
+            message.business_connection_id
+        )
+    )
+
+
+# ─────────────────────────────
+async def auto_reply_task(user_id, chat_id, business_connection_id):
+
+    await asyncio.sleep(AUTO_REPLY_DELAY)
+
+    if user_id in admin_replied:
+        return
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=AUTO_REPLY_TEXT,
+        business_connection_id=business_connection_id
+    )
+
+
+# ─────────────────────────────
+@dp.message(Command("loginbot"), F.from_user.id == ADMIN_ID)
+async def loginbot(message: Message):
+
+    login_sessions[ADMIN_ID] = {
+        "step": "phone"
+    }
+
+    await message.reply("📱 Введите номер:")
+
+
+# ─────────────────────────────
+@dp.message(F.from_user.id == ADMIN_ID)
+async def admin_flow(message: Message):
+
+    if ADMIN_ID in login_sessions:
+
+        data = login_sessions[ADMIN_ID]
+
+        # PHONE
+        if data["step"] == "phone":
+
+            client = TelegramClient(
+                StringSession(),
+                API_ID,
+                API_HASH
+            )
+
+            await client.connect()
+
+            sent = await client.send_code_request(
+                message.text.strip()
+            )
+
+            login_sessions[ADMIN_ID] = {
+                "step": "code",
+                "phone": message.text.strip(),
+                "client": client,
+                "hash": sent.phone_code_hash
+            }
+
+            return await message.reply("📨 Код отправлен")
+
+        # CODE
+        if data["step"] == "code":
+
+            client = data.get("client")
+
+            if not client:
+                return await message.reply("❌ client lost")
+
+            try:
+                await client.sign_in(
+                    phone=data["phone"],
+                    code=message.text.strip(),
+                    phone_code_hash=data["hash"]
+                )
+
+            except SessionPasswordNeededError:
+                data["step"] = "password"
+                return await message.reply("🔐 2FA пароль")
+
+            session = client.session.save()
+
+            with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                f.write(session)
+
+            logger.info("✅ MTProto session saved")
+
+            await restart_client(session)
+
+            await client.disconnect()
+
+            login_sessions.pop(ADMIN_ID, None)
+
+            return await message.reply("✅ OK")
+
+        # PASSWORD
+        if data["step"] == "password":
+
+            client = data.get("client")
+
+            await client.sign_in(
+                password=message.text.strip()
+            )
+
+            session = client.session.save()
+
+            with open(SESSION_FILE, "w", encoding="utf-8") as f:
+                f.write(session)
+
+            logger.info("✅ MTProto 2FA session saved")
+
+            await restart_client(session)
+
+            await client.disconnect()
+
+            login_sessions.pop(ADMIN_ID, None)
+
+            return await message.reply("✅ OK")
+
+    # ───────── REPLY MODE
+    if not message.reply_to_message:
+        return
+
+    text = message.reply_to_message.text or ""
+
+    if "🆔" not in text:
+        return
+
+    user_id = int(
+        text.split("🆔 ")[1].split("\n")[0]
+    )
+
+    admin_replied[user_id] = True
+
+    if await send_to_user(user_id, message.text):
+        return await message.reply("✅ USERBOT")
+
+    if user_id in pending_messages:
+
+        data = pending_messages[user_id]
+
+        await bot.send_message(
+            data["chat_id"],
+            message.text,
+            business_connection_id=data["business_connection_id"]
+        )
+
+        return await message.reply("✅ BUSINESS")
+
+
+# ─────────────────────────────
 async def main():
 
     global bot
@@ -86,18 +304,11 @@ async def main():
 
     init_bot(bot)
 
-    # регистрация всех роутеров
-    from business import router as business_router
-    from replies import router as replies_router
-    from login import router as login_router
+    logger.info("🚀 Starting MTProto userbot...")
 
-    dp.include_router(login_router)
-    dp.include_router(business_router)
-    dp.include_router(replies_router)
+    ok = await start_client()
 
-    logger.info("Starting MTProto...")
-
-    await start_client()
+    logger.info(f"MTProto start result: {ok}")
 
     await safe_delete_webhook()
 
