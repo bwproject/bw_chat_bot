@@ -1,5 +1,3 @@
-#main.py (не удалять)
-
 # ─── Включение / отключение прокси ───────────
 USE_PROXY = True   # True = использовать прокси
                    # False = запуск без прокси
@@ -31,13 +29,13 @@ from telethon.errors import SessionPasswordNeededError
 
 from proxsybot import init_proxy, proxy_watcher
 
-#from user import (
-#    start_client,
-#    restart_client,
-#    init_bot,
-#    send_to_user,
-#    create_new_chat
-#)
+from user import (
+    start_client,
+    restart_client,
+    init_bot,
+    send_to_user,
+    create_new_chat
+)
 
 # ─────────────────────────────
 TOKEN = os.getenv("BOT_TOKEN")
